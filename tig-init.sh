@@ -51,7 +51,6 @@ detect_os() {
   INIT_SYSTEM=""
 
   if [[ -f /etc/os-release ]]; then
-    # shellcheck source=/dev/null
     . /etc/os-release
     OS_ID="${ID:-unknown}"
   else
@@ -134,18 +133,18 @@ enable_kernel_modules_for_docker() {
     fi
   done
 
-  cat >/etc/modules-load.d/docker.conf <<EOF
+  cat > /etc/modules-load.d/docker.conf << 'END_MODULES'
 br_netfilter
 nf_nat
 overlay
 bridge
-EOF
+END_MODULES
 
-  cat >/etc/sysctl.d/99-docker.conf <<EOF
+  cat > /etc/sysctl.d/99-docker.conf << 'END_SYSCTL'
 net.ipv4.ip_forward=1
 net.bridge.bridge-nf-call-iptables=1
 net.bridge.bridge-nf-call-ip6tables=1
-EOF
+END_SYSCTL
 
   sysctl --system >/dev/null 2>&1 || true
   log "sysctl net.ipv4.ip_forward=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo N/A)"
@@ -219,9 +218,7 @@ install_docker_apt() {
   arch="$(dpkg --print-architecture)"
   codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
 
-  cat >/etc/apt/sources.list.d/docker.list <<EOF
-deb [arch=${arch} signed-by=${gpg_file}] https://download.docker.com/linux/${OS_ID} ${codename} stable
-EOF
+  echo "deb [arch=${arch} signed-by=${gpg_file}] https://download.docker.com/linux/${OS_ID} ${codename} stable" > /etc/apt/sources.list.d/docker.list
 
   apt-get update -y
   apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
@@ -237,7 +234,6 @@ install_docker_rhel() {
   "$PKG_MGR" config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
 
   "$PKG_MGR" -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
   "$PKG_MGR" -y install container-selinux || warn "container-selinux not available"
 
   systemctl enable --now docker
@@ -390,7 +386,7 @@ generate_telegraf_config() {
   create_folder "telegraf-config/telegraf.d"
 
   if [[ ! -f telegraf-config/telegraf.conf ]]; then
-    cat > telegraf-config/telegraf.conf <<'TELEOF'
+    cat > telegraf-config/telegraf.conf << 'END_TELEGRAF_CONF'
 [agent]
   interval = "30s"
   round_interval = true
@@ -432,7 +428,7 @@ generate_telegraf_config() {
   timeout = "5s"
   perdevice = true
   total = false
-TELEOF
+END_TELEGRAF_CONF
   fi
 
   local existing_org="" existing_bucket=""
@@ -447,19 +443,17 @@ TELEOF
   INFLUX_ORG="${ORG_IN:-${existing_org:-myorg}}"
   INFLUX_BUCKET="${BUCKET_IN:-${existing_bucket:-mybucket}}"
 
-  cat > .env.tig <<ENVEOF
-INFLUX_ORG=${INFLUX_ORG}
-INFLUX_BUCKET=${INFLUX_BUCKET}
-ENVEOF
+  echo "INFLUX_ORG=${INFLUX_ORG}" > .env.tig
+  echo "INFLUX_BUCKET=${INFLUX_BUCKET}" >> .env.tig
   chmod 600 .env.tig
 
-  cat > telegraf-config/telegraf.d/000-influxdb.conf <<OUTEOF
+  cat > telegraf-config/telegraf.d/000-influxdb.conf << END_INFLUX_OUTPUT
 [[outputs.influxdb_v2]]
   urls = ["http://influxdb:8086"]
   token = "${INFLUX_TOKEN}"
   organization = "${INFLUX_ORG}"
   bucket = "${INFLUX_BUCKET}"
-OUTEOF
+END_INFLUX_OUTPUT
 
   log "Telegraf configuration generated."
 }
@@ -481,7 +475,7 @@ generate_docker_compose() {
     ZOPT=":z"
   fi
 
-  cat > docker-compose.yml <<DCEOF
+  cat > docker-compose.yml << END_DOCKER_COMPOSE
 services:
   influxdb:
     image: influxdb:latest
@@ -559,7 +553,7 @@ secrets:
 networks:
   default:
     name: ${NETWORK_NAME}
-DCEOF
+END_DOCKER_COMPOSE
 
   log "docker-compose.yml generated successfully."
 }
@@ -575,7 +569,7 @@ create_systemd_service() {
 
   log "Creating systemd service for TIG stack..."
 
-  cat > /etc/systemd/system/tig-stack.service <<SYSEOF
+  cat > /etc/systemd/system/tig-stack.service << END_SYSTEMD_SERVICE
 [Unit]
 Description=TIG Stack (Telegraf, InfluxDB, Grafana)
 Requires=docker.service
@@ -591,7 +585,7 @@ TimeoutStartSec=0
 
 [Install]
 WantedBy=multi-user.target
-SYSEOF
+END_SYSTEMD_SERVICE
 
   systemctl daemon-reload
   systemctl enable tig-stack.service
@@ -671,81 +665,43 @@ create_management_scripts() {
 
   cd "${INSTALL_DIR}"
 
-  cat > start.sh <<'STARTEOF'
-#!/bin/bash
-cd /opt/askme2u
-docker compose up -d
-echo "TIG Stack started"
-docker compose ps
-STARTEOF
+  echo '#!/bin/bash' > start.sh
+  echo 'cd /opt/askme2u' >> start.sh
+  echo 'docker compose up -d' >> start.sh
+  echo 'echo "TIG Stack started"' >> start.sh
+  echo 'docker compose ps' >> start.sh
   chmod +x start.sh
 
-  cat > stop.sh <<'STOPEOF'
-#!/bin/bash
-cd /opt/askme2u
-docker compose down
-echo "TIG Stack stopped"
-STOPEOF
+  echo '#!/bin/bash' > stop.sh
+  echo 'cd /opt/askme2u' >> stop.sh
+  echo 'docker compose down' >> stop.sh
+  echo 'echo "TIG Stack stopped"' >> stop.sh
   chmod +x stop.sh
 
-  cat > restart.sh <<'RESTARTEOF'
-#!/bin/bash
-cd /opt/askme2u
-docker compose restart
-echo "TIG Stack restarted"
-docker compose ps
-RESTARTEOF
+  echo '#!/bin/bash' > restart.sh
+  echo 'cd /opt/askme2u' >> restart.sh
+  echo 'docker compose restart' >> restart.sh
+  echo 'echo "TIG Stack restarted"' >> restart.sh
+  echo 'docker compose ps' >> restart.sh
   chmod +x restart.sh
 
-  cat > status.sh <<'STATUSEOF'
-#!/bin/bash
-cd /opt/askme2u
-docker compose ps
-echo ""
-echo "Logs (last 20 lines):"
-docker compose logs --tail=20
-STATUSEOF
+  echo '#!/bin/bash' > status.sh
+  echo 'cd /opt/askme2u' >> status.sh
+  echo 'docker compose ps' >> status.sh
+  echo 'echo ""' >> status.sh
+  echo 'echo "Logs (last 20 lines):"' >> status.sh
+  echo 'docker compose logs --tail=20' >> status.sh
   chmod +x status.sh
 
-  cat > update.sh <<'UPDATEEOF'
-#!/bin/bash
-cd /opt/askme2u
-echo "Pulling latest images..."
-docker compose pull
-echo "Recreating containers..."
-docker compose up -d
-echo "Update complete"
-docker compose ps
-UPDATEEOF
+  echo '#!/bin/bash' > update.sh
+  echo 'cd /opt/askme2u' >> update.sh
+  echo 'echo "Pulling latest images..."' >> update.sh
+  echo 'docker compose pull' >> update.sh
+  echo 'echo "Recreating containers..."' >> update.sh
+  echo 'docker compose up -d' >> update.sh
+  echo 'echo "Update complete"' >> update.sh
+  echo 'docker compose ps' >> update.sh
   chmod +x update.sh
-
-  cat > backup.sh <<'BACKUPEOF'
-#!/bin/bash
-BACKUP_DIR="/opt/askme2u/backups"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-
-mkdir -p "$BACKUP_DIR"
-
-echo "Creating backup: $TIMESTAMP"
-
-docker exec influxdb influx backup /tmp/backup -t $(cat /opt/askme2u/.env.influxdb-admin-token)
-docker cp influxdb:/tmp/backup "$BACKUP_DIR/influxdb_${TIMESTAMP}"
-docker exec influxdb rm -rf /tmp/backup
-
-tar -czf "$BACKUP_DIR/grafana_${TIMESTAMP}.tar.gz" -C /opt/askme2u grafana-data
-
-tar -czf "$BACKUP_DIR/configs_${TIMESTAMP}.tar.gz" -C /opt/askme2u \
-  telegraf-config \
-  .env.influxdb-admin-token \
-  .env.influxdb-admin-username \
-  .env.influxdb-admin-password \
-  .env.tig \
-  docker-compose.yml
-
-echo "Backup completed: $BACKUP_DIR"
-ls -lh "$BACKUP_DIR" | tail -n 3
-BACKUPEOF
-  chmod +x backup.sh
 
   log "Management scripts created in ${INSTALL_DIR}/"
 }
@@ -759,16 +715,113 @@ create_readme() {
   local ip
   ip="$(get_local_ip)"
 
-  cat > "${INSTALL_DIR}/README.md" <<'READMEEOF'
-# TIG Stack - AskMe2U
+  echo "# TIG Stack - AskMe2U" > "${INSTALL_DIR}/README.md"
+  echo "" >> "${INSTALL_DIR}/README.md"
+  echo "## Access Information" >> "${INSTALL_DIR}/README.md"
+  echo "" >> "${INSTALL_DIR}/README.md"
+  echo "- InfluxDB: http://${ip}:8086" >> "${INSTALL_DIR}/README.md"
+  echo "- Grafana: http://${ip}:3000 (admin/admin)" >> "${INSTALL_DIR}/README.md"
+  echo "- Username: ${INFLUX_USERNAME}" >> "${INSTALL_DIR}/README.md"
+  echo "- Organization: ${INFLUX_ORG}" >> "${INSTALL_DIR}/README.md"
+  echo "- Bucket: ${INFLUX_BUCKET}" >> "${INSTALL_DIR}/README.md"
+  echo "" >> "${INSTALL_DIR}/README.md"
+  echo "## Quick Commands" >> "${INSTALL_DIR}/README.md"
+  echo "" >> "${INSTALL_DIR}/README.md"
+  echo "cd ${INSTALL_DIR}" >> "${INSTALL_DIR}/README.md"
+  echo "./start.sh    - Start services" >> "${INSTALL_DIR}/README.md"
+  echo "./stop.sh     - Stop services" >> "${INSTALL_DIR}/README.md"
+  echo "./restart.sh  - Restart services" >> "${INSTALL_DIR}/README.md"
+  echo "./status.sh   - Check status" >> "${INSTALL_DIR}/README.md"
+  echo "./update.sh   - Update images" >> "${INSTALL_DIR}/README.md"
 
-## Quick Start
+  chmod 644 "${INSTALL_DIR}/README.md"
+  log "README created at ${INSTALL_DIR}/README.md"
+}
 
-```bash
-cd /opt/askme2u
-./start.sh      # Start all services
-./stop.sh       # Stop all services  
-./restart.sh    # Restart all services
-./status.sh     # Check status
-./update.sh     # Update to latest
-./backup.sh     # Create backup
+# ===========================================================
+# DISPLAY INFORMATION
+# ===========================================================
+display_info() {
+  local ip
+  ip="$(get_local_ip)"
+
+  echo ""
+  echo "=============================================="
+  echo "  TIG Stack Installation Completed!"
+  echo "=============================================="
+  echo ""
+  echo "Installation Directory: ${INSTALL_DIR}"
+  echo ""
+  echo "InfluxDB:"
+  echo "  URL:      http://${ip}:8086"
+  echo "  Username: ${INFLUX_USERNAME}"
+  echo "  Password: ${INFLUX_PASSWORD}"
+  echo "  Org:      ${INFLUX_ORG}"
+  echo "  Bucket:   ${INFLUX_BUCKET}"
+  echo ""
+  echo "Grafana:"
+  echo "  URL:      http://${ip}:3000"
+  echo "  Username: admin"
+  echo "  Password: admin"
+  echo ""
+  echo "Quick Commands:"
+  echo "  cd ${INSTALL_DIR}"
+  echo "  ./start.sh"
+  echo "  ./status.sh"
+  echo "  docker compose logs -f"
+  echo "=============================================="
+  echo ""
+}
+
+# ===========================================================
+# CLEANUP ON ERROR
+# ===========================================================
+cleanup_on_error() {
+  error "Installation failed. Cleaning up..."
+
+  if [[ -d "${INSTALL_DIR}" ]]; then
+    cd "${INSTALL_DIR}"
+    docker compose down 2>/dev/null || true
+  fi
+}
+
+# ===========================================================
+# MAIN SCRIPT EXECUTION
+# ===========================================================
+main() {
+  trap cleanup_on_error ERR
+
+  log "Starting TIG Stack installation..."
+  log "Installation directory: ${INSTALL_DIR}"
+
+  need_root
+  detect_os
+  detect_selinux
+
+  create_folder "${INSTALL_DIR}"
+
+  install_required_packages
+  enable_kernel_modules_for_docker
+  fix_firewalld_backend_if_needed
+  install_docker_repo
+  add_user_to_docker_group
+  verify_docker
+
+  generate_env_files
+  generate_telegraf_config
+  generate_docker_compose
+  prepare_data_dirs
+
+  run_stack
+  wait_for_influxdb
+
+  create_systemd_service
+  create_management_scripts
+  create_readme
+
+  display_info
+
+  log "Installation completed successfully!"
+}
+
+main "$@"
