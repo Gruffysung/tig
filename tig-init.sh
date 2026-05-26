@@ -236,10 +236,8 @@ install_docker_rhel() {
   "$PKG_MGR" -y install yum-utils ca-certificates curl
   "$PKG_MGR" config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
 
-  # Install with proper error handling
   "$PKG_MGR" -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-  # Install container-selinux if available
   "$PKG_MGR" -y install container-selinux || warn "container-selinux not available"
 
   systemctl enable --now docker
@@ -306,19 +304,16 @@ verify_docker() {
 fix_bind_mount_permissions() {
   log "Fixing bind mount directory permissions..."
 
-  # Grafana runs as UID/GID 472
   if [[ -d "${INSTALL_DIR}/grafana-data" ]]; then
     chown -R 472:472 "${INSTALL_DIR}/grafana-data" || warn "Failed to chown grafana-data"
     chmod -R 755 "${INSTALL_DIR}/grafana-data" || warn "Failed to chmod grafana-data"
   fi
 
-  # InfluxDB v2 uses UID/GID 1000
   if [[ -d "${INSTALL_DIR}/influxdb" ]]; then
     chown -R 1000:1000 "${INSTALL_DIR}/influxdb" || warn "Failed to chown influxdb"
     chmod -R 755 "${INSTALL_DIR}/influxdb" || warn "Failed to chmod influxdb"
   fi
 
-  # Telegraf config should be readable
   if [[ -d "${INSTALL_DIR}/telegraf-config" ]]; then
     chmod -R 755 "${INSTALL_DIR}/telegraf-config" || warn "Failed to chmod telegraf-config"
   fi
@@ -338,7 +333,6 @@ generate_env_files() {
   local user_file=".env.influxdb-admin-username"
   local pass_file=".env.influxdb-admin-password"
 
-  # Generate token
   if [[ ! -f "$token_file" ]]; then
     if ! command_exists openssl; then
       error "openssl is required but not installed"
@@ -353,7 +347,6 @@ generate_env_files() {
     log "Using existing token file: $token_file"
   fi
 
-  # Prompt for username
   if [[ ! -f "$user_file" ]]; then
     read -rp "InfluxDB admin username [admin]: " admuser
     admuser="${admuser:-admin}"
@@ -365,7 +358,6 @@ generate_env_files() {
     log "Using existing username file: $user_file"
   fi
 
-  # Prompt for password
   if [[ ! -f "$pass_file" ]]; then
     while true; do
       read -srp "InfluxDB admin password: " admpass
@@ -397,9 +389,8 @@ generate_telegraf_config() {
   cd "${INSTALL_DIR}"
   create_folder "telegraf-config/telegraf.d"
 
-  # Main telegraf.conf
   if [[ ! -f telegraf-config/telegraf.conf ]]; then
-    cat > telegraf-config/telegraf.conf <<'EOF'
+    cat > telegraf-config/telegraf.conf <<'TELEOF'
 [agent]
   interval = "30s"
   round_interval = true
@@ -438,19 +429,12 @@ generate_telegraf_config() {
 [[inputs.docker]]
   endpoint = "unix:///var/run/docker.sock"
   gather_services = false
-  container_names = []
-  source_tag = false
-  container_name_include = []
-  container_name_exclude = []
   timeout = "5s"
   perdevice = true
   total = false
-  docker_label_include = []
-  docker_label_exclude = []
-EOF
+TELEOF
   fi
 
-  # Prompt for org and bucket (with existing value support)
   local existing_org="" existing_bucket=""
   if [[ -f ".env.tig" ]]; then
     existing_org="$(grep '^INFLUX_ORG=' .env.tig 2>/dev/null | cut -d= -f2 || echo "")"
@@ -463,21 +447,19 @@ EOF
   INFLUX_ORG="${ORG_IN:-${existing_org:-myorg}}"
   INFLUX_BUCKET="${BUCKET_IN:-${existing_bucket:-mybucket}}"
 
-  # Save to .env.tig for reference
-  cat > .env.tig <<EOF
+  cat > .env.tig <<ENVEOF
 INFLUX_ORG=${INFLUX_ORG}
 INFLUX_BUCKET=${INFLUX_BUCKET}
-EOF
+ENVEOF
   chmod 600 .env.tig
 
-  # Output config
-  cat > telegraf-config/telegraf.d/000-influxdb.conf <<EOF
+  cat > telegraf-config/telegraf.d/000-influxdb.conf <<OUTEOF
 [[outputs.influxdb_v2]]
   urls = ["http://influxdb:8086"]
   token = "${INFLUX_TOKEN}"
   organization = "${INFLUX_ORG}"
   bucket = "${INFLUX_BUCKET}"
-EOF
+OUTEOF
 
   log "Telegraf configuration generated."
 }
@@ -494,14 +476,12 @@ generate_docker_compose() {
     cp docker-compose.yml "docker-compose.yml.${timestamp}"
   fi
 
-  # SELinux flag
   local ZOPT=""
   if [[ "$SELINUX_ENFORCING" == "1" ]]; then
     ZOPT=":z"
   fi
 
-  # Create docker-compose.yml with hardcoded values (not using env substitution)
-  cat > docker-compose.yml <<EOF
+  cat > docker-compose.yml <<DCEOF
 services:
   influxdb:
     image: influxdb:latest
@@ -579,7 +559,7 @@ secrets:
 networks:
   default:
     name: ${NETWORK_NAME}
-EOF
+DCEOF
 
   log "docker-compose.yml generated successfully."
 }
@@ -595,7 +575,7 @@ create_systemd_service() {
 
   log "Creating systemd service for TIG stack..."
 
-  cat > /etc/systemd/system/tig-stack.service <<EOF
+  cat > /etc/systemd/system/tig-stack.service <<SYSEOF
 [Unit]
 Description=TIG Stack (Telegraf, InfluxDB, Grafana)
 Requires=docker.service
@@ -611,7 +591,7 @@ TimeoutStartSec=0
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SYSEOF
 
   systemctl daemon-reload
   systemctl enable tig-stack.service
@@ -642,11 +622,9 @@ run_stack() {
 
   cd "${INSTALL_DIR}"
 
-  # Pull latest images
   log "Pulling latest Docker images..."
   docker compose pull
 
-  # Start services
   docker compose up -d
 
   log "TIG stack containers started."
@@ -693,48 +671,43 @@ create_management_scripts() {
 
   cd "${INSTALL_DIR}"
 
-  # Start script
-  cat > start.sh <<'EOF'
+  cat > start.sh <<'STARTEOF'
 #!/bin/bash
 cd /opt/askme2u
 docker compose up -d
 echo "TIG Stack started"
 docker compose ps
-EOF
+STARTEOF
   chmod +x start.sh
 
-  # Stop script
-  cat > stop.sh <<'EOF'
+  cat > stop.sh <<'STOPEOF'
 #!/bin/bash
 cd /opt/askme2u
 docker compose down
 echo "TIG Stack stopped"
-EOF
+STOPEOF
   chmod +x stop.sh
 
-  # Restart script
-  cat > restart.sh <<'EOF'
+  cat > restart.sh <<'RESTARTEOF'
 #!/bin/bash
 cd /opt/askme2u
 docker compose restart
 echo "TIG Stack restarted"
 docker compose ps
-EOF
+RESTARTEOF
   chmod +x restart.sh
 
-  # Status script
-  cat > status.sh <<'EOF'
+  cat > status.sh <<'STATUSEOF'
 #!/bin/bash
 cd /opt/askme2u
 docker compose ps
 echo ""
 echo "Logs (last 20 lines):"
 docker compose logs --tail=20
-EOF
+STATUSEOF
   chmod +x status.sh
 
-  # Update script
-  cat > update.sh <<'EOF'
+  cat > update.sh <<'UPDATEEOF'
 #!/bin/bash
 cd /opt/askme2u
 echo "Pulling latest images..."
@@ -743,11 +716,10 @@ echo "Recreating containers..."
 docker compose up -d
 echo "Update complete"
 docker compose ps
-EOF
+UPDATEEOF
   chmod +x update.sh
 
-  # Backup script
-  cat > backup.sh <<'EOF'
+  cat > backup.sh <<'BACKUPEOF'
 #!/bin/bash
 BACKUP_DIR="/opt/askme2u/backups"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -756,15 +728,12 @@ mkdir -p "$BACKUP_DIR"
 
 echo "Creating backup: $TIMESTAMP"
 
-# Backup InfluxDB
 docker exec influxdb influx backup /tmp/backup -t $(cat /opt/askme2u/.env.influxdb-admin-token)
 docker cp influxdb:/tmp/backup "$BACKUP_DIR/influxdb_${TIMESTAMP}"
 docker exec influxdb rm -rf /tmp/backup
 
-# Backup Grafana
 tar -czf "$BACKUP_DIR/grafana_${TIMESTAMP}.tar.gz" -C /opt/askme2u grafana-data
 
-# Backup configs
 tar -czf "$BACKUP_DIR/configs_${TIMESTAMP}.tar.gz" -C /opt/askme2u \
   telegraf-config \
   .env.influxdb-admin-token \
@@ -775,7 +744,7 @@ tar -czf "$BACKUP_DIR/configs_${TIMESTAMP}.tar.gz" -C /opt/askme2u \
 
 echo "Backup completed: $BACKUP_DIR"
 ls -lh "$BACKUP_DIR" | tail -n 3
-EOF
+BACKUPEOF
   chmod +x backup.sh
 
   log "Management scripts created in ${INSTALL_DIR}/"
@@ -790,138 +759,16 @@ create_readme() {
   local ip
   ip="$(get_local_ip)"
 
-  cat > "${INSTALL_DIR}/README.md" <<EOF
+  cat > "${INSTALL_DIR}/README.md" <<'READMEEOF'
 # TIG Stack - AskMe2U
 
-TIG Stack installation at: ${INSTALL_DIR}
+## Quick Start
 
-## Services
-
-### InfluxDB
-- **URL:** http://${ip}:8086
-- **Username:** ${INFLUX_USERNAME}
-- **Password:** ${INFLUX_PASSWORD}
-- **Organization:** ${INFLUX_ORG}
-- **Bucket:** ${INFLUX_BUCKET}
-- **Token:** ${INFLUX_TOKEN}
-
-### Grafana
-- **URL:** http://${ip}:3000
-- **Username:** admin
-- **Password:** admin
-- **Note:** Change password on first login
-
-### Telegraf
-- **Status:** Running and collecting metrics
-- **Config:** ${INSTALL_DIR}/telegraf-config/
-
-## Quick Management
-
-### Using helper scripts
-\`\`\`bash
-cd ${INSTALL_DIR}
+```bash
+cd /opt/askme2u
 ./start.sh      # Start all services
-./stop.sh       # Stop all services
+./stop.sh       # Stop all services  
 ./restart.sh    # Restart all services
-./status.sh     # Check status and logs
-./update.sh     # Update to latest images
+./status.sh     # Check status
+./update.sh     # Update to latest
 ./backup.sh     # Create backup
-\`\`\`
-
-### Using Docker Compose directly
-\`\`\`bash
-cd ${INSTALL_DIR}
-docker compose ps              # List containers
-docker compose logs -f         # View all logs
-docker compose logs -f influxdb # View specific service logs
-docker compose restart         # Restart all services
-docker compose restart influxdb # Restart specific service
-docker compose down            # Stop and remove containers
-docker compose up -d           # Start containers
-\`\`\`
-
-### Using Systemd
-\`\`\`bash
-sudo systemctl start tig-stack
-sudo systemctl stop tig-stack
-sudo systemctl restart tig-stack
-sudo systemctl status tig-stack
-\`\`\`
-
-## Configuration Files
-
-- **InfluxDB Data:** ${INSTALL_DIR}/influxdb/data
-- **InfluxDB Config:** ${INSTALL_DIR}/influxdb/config
-- **Grafana Data:** ${INSTALL_DIR}/grafana-data
-- **Telegraf Config:** ${INSTALL_DIR}/telegraf-config
-- **Docker Compose:** ${INSTALL_DIR}/docker-compose.yml
-- **Credentials:** ${INSTALL_DIR}/.env.*
-
-## Adding Telegraf Inputs
-
-Create new config files in \`${INSTALL_DIR}/telegraf-config/telegraf.d/\`
-
-### Example - Monitor MySQL
-\`\`\`bash
-cat > ${INSTALL_DIR}/telegraf-config/telegraf.d/mysql.conf <<'EOL'
-[[inputs.mysql]]
-  servers = ["user:password@tcp(127.0.0.1:3306)/"]
-  metric_version = 2
-EOL
-
-cd ${INSTALL_DIR}
-docker compose restart telegraf
-\`\`\`
-
-### Example - Monitor PostgreSQL
-\`\`\`bash
-cat > ${INSTALL_DIR}/telegraf-config/telegraf.d/postgresql.conf <<'EOL'
-[[inputs.postgresql]]
-  address = "host=localhost user=postgres password=secret sslmode=disable"
-EOL
-
-cd ${INSTALL_DIR}
-docker compose restart telegraf
-\`\`\`
-
-### Example - Monitor Redis
-\`\`\`bash
-cat > ${INSTALL_DIR}/telegraf-config/telegraf.d/redis.conf <<'EOL'
-[[inputs.redis]]
-  servers = ["tcp://localhost:6379"]
-EOL
-
-cd ${INSTALL_DIR}
-docker compose restart telegraf
-\`\`\`
-
-### Example - Monitor Nginx
-\`\`\`bash
-cat > ${INSTALL_DIR}/telegraf-config/telegraf.d/nginx.conf <<'EOL'
-[[inputs.nginx]]
-  urls = ["http://localhost/nginx_status"]
-EOL
-
-cd ${INSTALL_DIR}
-docker compose restart telegraf
-\`\`\`
-
-## Grafana Data Source Setup
-
-1. Open Grafana: http://${ip}:3000
-2. Login with admin/admin
-3. Go to **Configuration** → **Data Sources**
-4. Click **Add data source**
-5. Select **InfluxDB**
-6. Configure:
-   - **Query Language:** Flux
-   - **URL:** http://influxdb:8086
-   - **Organization:** ${INFLUX_ORG}
-   - **Token:** ${INFLUX_TOKEN}
-   - **Default Bucket:** ${INFLUX_BUCKET}
-7. Click **Save & Test**
-
-## Sample Flux Queries
-
-### CPU Usage
-\`
